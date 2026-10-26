@@ -27,8 +27,7 @@ jobs:
 
       - name: Find uploaded ZIP
         run: |
-          ZIP_FILE="RailPrep-APK-Build-Ready.zip"
-
+          ZIP_FILE="RailPrep-Updated-Project.zip"
           if [ ! -f "$ZIP_FILE" ]; then
             echo "ERROR: $ZIP_FILE was not found in the repository root."
             echo "Upload the ZIP file to the root of your repository."
@@ -40,7 +39,7 @@ jobs:
       - name: Extract Android project
         run: |
           mkdir -p extracted
-          unzip -q RailPrep-APK-Build-Ready.zip -d extracted
+          unzip -q "$ZIP_FILE" -d extracted
 
           SETTINGS_FILE=$(find extracted -type f \
             -name settings.gradle -print -quit)
