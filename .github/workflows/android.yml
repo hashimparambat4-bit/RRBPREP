@@ -6,78 +6,138 @@ on:
     branches:
       - main
       - master
+    paths:
+      - '*.zip'
+      - '.github/workflows/android.yml'
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Extract ZIP and Build APK
+    name: Extract and Build RailPrep
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download repository files
+      # Step 1: Download repository files
+      - name: Checkout repository
         uses: actions/checkout@v5
 
+      # Step 2: Install Java
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Find uploaded ZIP
+      # Step 3: Find and extract the project ZIP
+      - name: Extract RailPrep project
+        shell: bash
         run: |
+          set -euo pipefail
+
           ZIP_FILE="RailPrep-Updated-Project.zip"
+
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: $ZIP_FILE was not found in the repository root."
-            echo "Upload the ZIP file to the root of your repository."
+            echo "ERROR: $ZIP_FILE not found in repository root."
+            echo "ZIP files available:"
+            find . -maxdepth 2 -type f -iname '*.zip' -print
             exit 1
           fi
 
-          echo "Found ZIP: $ZIP_FILE"
+          mkdir -p "$GITHUB_WORKSPACE/extracted"
 
-      - name: Extract Android project
+          unzip -t "$ZIP_FILE"
+          unzip -oq "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
+
+          echo "ZIP extracted successfully."
+
+          echo "Files found:"
+          find "$GITHUB_WORKSPACE/extracted" \
+            -maxdepth 4 -type f \
+            \( -name 'settings.gradle' \
+            -o -name 'settings.gradle.kts' \
+            -o -name 'gradlew' \
+            -o -name 'build.gradle' \
+            -o -name 'build.gradle.kts' \) -print
+
+      # Step 4: Locate the Android project
+      - name: Locate Gradle project
+        shell: bash
         run: |
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
+          set -euo pipefail
 
-          SETTINGS_FILE=$(find extracted -type f \
-            -name settings.gradle -print -quit)
+          ROOT="$GITHUB_WORKSPACE/extracted"
+
+          SETTINGS_FILE=$(find "$ROOT" -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: No settings.gradle found inside the ZIP."
+            echo "ERROR: No settings.gradle or settings.gradle.kts found."
+            echo "The ZIP may not contain a complete Gradle project."
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Android project found at: $PROJECT_DIR"
+          echo "Gradle project: $PROJECT_DIR"
 
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: The project has no app directory."
+            echo "Check whether this is an Android application project."
+            exit 1
+          fi
+
+      # Step 5: Set up Gradle
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '8.9'
 
-      - name: Build RailPrep APK
+      # Step 6: Build the APK
+      - name: Build debug APK
+        shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
-          gradle assembleDebug
 
-      - name: Prepare APK
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            gradle --no-daemon assembleDebug
+          fi
+
+      # Step 7: Find the generated APK
+      - name: Find generated APK
+        shell: bash
         run: |
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          set -euo pipefail
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not generated."
+          APK=$(find "$PROJECT_DIR/app/build/outputs/apk" \
+            -type f -name '*.apk' \
+            -path '*/debug/*' -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: No debug APK was generated."
             exit 1
           fi
 
-          cp "$APK" "$GITHUB_WORKSPACE/RailPrep-debug.apk"
+          mkdir -p "$GITHUB_WORKSPACE/apk-output"
+          cp "$APK" "$GITHUB_WORKSPACE/apk-output/RailPrep-debug.apk"
 
-      - name: Upload APK
+          echo "APK successfully generated."
+          ls -lh "$GITHUB_WORKSPACE/apk-output/RailPrep-debug.apk"
+
+      # Step 8: Upload the APK for download
+      - name: Upload RailPrep APK
         uses: actions/upload-artifact@v4
         with:
           name: RailPrep-debug-apk
-          path: RailPrep-debug.apk
+          path: apk-output/RailPrep-debug.apk
           if-no-files-found: error
+          retention-days: 14
