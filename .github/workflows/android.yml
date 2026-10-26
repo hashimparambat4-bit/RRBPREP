@@ -3,7 +3,7 @@ name: Build RailPrep APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -18,8 +18,8 @@ jobs:
 
       - name: Extract Android project
         run: |
-          mkdir project
-          unzip -o RailPrep-Corrected-Android-Project.zip -d project
+          mkdir -p project
+          unzip -o RailPrep-Questions-and-Icon-Fix.zip -d project
 
       - name: Set up Java
         uses: actions/setup-java@v5
