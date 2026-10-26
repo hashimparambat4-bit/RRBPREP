@@ -65,10 +65,10 @@ jobs:
               break
             fi
           done < <(
-            find extracted -type f \
+            find extracted -type f \( \
               -name settings.gradle -o \
               -name settings.gradle.kts \
-           
+            \)
           )
 
           if [ -z "$PROJECT_DIR" ]; then
@@ -119,4 +119,29 @@ jobs:
           ./gradlew --no-daemon assembleDebug
 
       # Step 7: Find the generated APK
-      - name: Locate generated
+      - name: Locate generated APK
+        shell: bash
+        run: |
+          set -e
+
+          APK_FILE="$(find "$PROJECT_DIR" \
+            -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            | head -n 1)"
+
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK file was not generated."
+            exit 1
+          fi
+
+          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
+          echo "APK generated: $APK_FILE"
+
+      # Step 8: Upload the APK
+      - name: Upload RRBPREP APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RRBPREP-debug-apk
+          path: ${{ env.APK_FILE }}
+          if-no-files-found: error
+          retention-days: 14
