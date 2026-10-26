@@ -24,10 +24,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Find and extract project ZIP
+      - name: Extract Android project ZIP
         shell: bash
         run: |
           set -e
@@ -35,14 +32,14 @@ jobs:
           ZIP_FILE="RRBPREP-MockTest-Back-Setup-Fixed-Android-Project.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Project ZIP not found: $ZIP_FILE"
+            echo "ERROR: ZIP file not found: $ZIP_FILE"
             exit 1
           fi
 
           mkdir -p extracted
           unzip -o "$ZIP_FILE" -d extracted
 
-          echo "ZIP extracted successfully."
+          echo "Project ZIP extracted."
 
       - name: Locate Android project
         shell: bash
@@ -66,12 +63,50 @@ jobs:
           \))
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: No Android project with Gradle wrapper found."
+            echo "ERROR: Android project or Gradle wrapper not found."
+            find extracted -maxdepth 5 -type f | head -100
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project: $PROJECT_DIR"
+          echo "Project found: $PROJECT_DIR"
+
+      - name: Set up Android SDK
+        shell: bash
+        run: |
+          set -e
+
+          SDK_DIR="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$SDK_DIR/cmdline-tools"
+
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "$SDK_DIR/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK_DIR/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
+
+          wget -q \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+            -O "$RUNNER_TEMP/android-tools.zip"
+
+          mkdir -p "$RUNNER_TEMP/android-tools"
+          unzip -q "$RUNNER_TEMP/android-tools.zip" \
+            -d "$RUNNER_TEMP/android-tools"
+
+          mkdir -p "$SDK_DIR/cmdline-tools/latest"
+          mv "$RUNNER_TEMP/android-tools/cmdline-tools/"* \
+            "$SDK_DIR/cmdline-tools/latest/"
+
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$SDK_DIR" --licenses >/dev/null || true
+
+          "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$SDK_DIR" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Build debug APK
         shell: bash
