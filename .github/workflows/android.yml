@@ -3,41 +3,82 @@ name: Build RailPrep APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Extract ZIP and Build APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Download repository files
         uses: actions/checkout@v5
-      - name: Extract Android project        
-        run: |
-            mkdir -p project
-            unzip -o RailPrep-PYQ-PDF-Dark-Mode.zip -d project
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Find uploaded ZIP
+        run: |
+          ZIP_FILE="RailPrep-APK-Build-Ready.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: $ZIP_FILE was not found in the repository root."
+            echo "Upload the ZIP file to the root of your repository."
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+      - name: Extract Android project
+        run: |
+          mkdir -p extracted
+          unzip -q RailPrep-APK-Build-Ready.zip -d extracted
+
+          SETTINGS_FILE=$(find extracted -type f \
+            -name settings.gradle -print -quit)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: No settings.gradle found inside the ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project found at: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
-        working-directory: project
-        run: gradle assembleDebug
+      - name: Build RailPrep APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug
+
+      - name: Prepare APK
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          cp "$APK" "$GITHUB_WORKSPACE/RailPrep-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: RailPrep-debug-apk
-          path: project/app/build/outputs/apk/debug/app-debug.apk
+          path: RailPrep-debug.apk
           if-no-files-found: error
