@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -22,21 +22,43 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -e
+
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platform-tools" >> "$GITHUB_PATH"
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -e
-          sdkmanager --install \
+
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME}/cmdline-tools" \
+              -type f -name sdkmanager -print -quit)"
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: Android SDK manager was not found."
+            exit 1
+          fi
+
+          echo "Using SDK manager: $SDKMANAGER"
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Extract Android project ZIP
+      - name: Extract Android project
         shell: bash
         run: |
           set -e
@@ -44,7 +66,7 @@ jobs:
           ZIP_FILE="RRBPREP-Mobile-Swipe-Fit-Dashboard-Updated-Project.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found: $ZIP_FILE"
+            echo "ERROR: Project ZIP not found: $ZIP_FILE"
             echo "ZIP files in repository:"
             find . -maxdepth 3 -type f -iname "*.zip"
             exit 1
@@ -53,14 +75,12 @@ jobs:
           mkdir -p extracted
           unzip -q "$ZIP_FILE" -d extracted
 
-          SETTINGS_FILE="$(find extracted -type f -name settings.gradle -print -quit)"
+          SETTINGS_FILE="$(find extracted -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)"
 
           if [ -z "$SETTINGS_FILE" ]; then
-            SETTINGS_FILE="$(find extracted -type f -name settings.gradle.kts -print -quit)"
-          fi
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle or settings.gradle.kts not found."
+            echo "ERROR: settings.gradle was not found inside the ZIP."
             exit 1
           fi
 
@@ -68,52 +88,52 @@ jobs:
 
           if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
              [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: Android app Gradle file not found."
+            echo "ERROR: app/build.gradle was not found."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project found at: $PROJECT_DIR"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Install Gradle 8.9
         shell: bash
         run: |
           set -e
 
-          GRADLE_VERSION="8.9"
-          GRADLE_HOME="$RUNNER_TEMP/gradle-$GRADLE_VERSION"
+          VERSION="8.9"
+          INSTALL_DIR="$RUNNER_TEMP/gradle-$VERSION"
 
-          if [ ! -x "$GRADLE_HOME/bin/gradle" ]; then
+          if [ ! -x "$INSTALL_DIR/bin/gradle" ]; then
             curl -fL \
-              "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+              "https://services.gradle.org/distributions/gradle-${VERSION}-bin.zip" \
               -o "$RUNNER_TEMP/gradle.zip"
 
-            mkdir -p "$RUNNER_TEMP/gradle-unpack"
-            unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP/gradle-unpack"
-            mv "$RUNNER_TEMP/gradle-unpack/gradle-${GRADLE_VERSION}" "$GRADLE_HOME"
+            unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+
+            mv "$RUNNER_TEMP/gradle-${VERSION}" "$INSTALL_DIR"
           fi
 
-          echo "$GRADLE_HOME/bin" >> "$GITHUB_PATH"
-          "$GRADLE_HOME/bin/gradle" --version
+          echo "$INSTALL_DIR/bin" >> "$GITHUB_PATH"
+          "$INSTALL_DIR/bin/gradle" --version
 
       - name: Build debug APK
         shell: bash
         run: |
           set -e
+
           cd "$PROJECT_DIR"
 
           gradle --no-daemon --stacktrace assembleDebug
 
-          echo "Checking for generated APK..."
-          find app/build/outputs/apk -type f -name "*.apk"
+          APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
-            echo "ERROR: Debug APK was not generated."
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            find app/build/outputs -type f -name "*.apk" || true
             exit 1
           fi
+
+          echo "Build successful: $APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
