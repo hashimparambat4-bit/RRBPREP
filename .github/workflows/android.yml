@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Extract and Build RRBPREP
+    name: Build RRBPREP Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -25,15 +25,30 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract project ZIP
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -e
+          sdkmanager "platform-tools" \
+                     "platforms;android-35" \
+                     "build-tools;35.0.0"
+
+      - name: Extract Android project
         shell: bash
         run: |
           set -e
 
-          ZIP_FILE="RRBPREP-MockTest-Back-Setup-Fixed-Android-Project.zip"
-
+          ZIP_FILE="RRBPREP-Mobile-Swipe-Fit-Dashboard-Updated-Project.zip"
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found in repository root."
+            echo "ERROR: Project ZIP not found in repository root."
             ls -la
             exit 1
           fi
@@ -41,7 +56,7 @@ jobs:
           mkdir -p extracted
           unzip -o "$ZIP_FILE" -d extracted
 
-          echo "ZIP extraction completed."
+          echo "Project ZIP extracted successfully."
 
       - name: Locate Android project
         shell: bash
@@ -53,8 +68,10 @@ jobs:
           while IFS= read -r file; do
             dir="$(dirname "$file")"
 
-            if [ -f "$dir/settings.gradle" ] || \
-               [ -f "$dir/settings.gradle.kts" ]; then
+            if { [ -f "$dir/settings.gradle" ] || \
+                 [ -f "$dir/settings.gradle.kts" ]; } && \
+               { [ -f "$dir/app/build.gradle" ] || \
+                 [ -f "$dir/app/build.gradle.kts" ]; }; then
               PROJECT_DIR="$dir"
               break
             fi
@@ -66,43 +83,13 @@ jobs:
           )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: settings.gradle was not found."
+            echo "ERROR: Android project files were not found."
             find extracted -maxdepth 6 -type f | head -150
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project found: $PROJECT_DIR"
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: App Gradle build file was not found."
-            exit 1
-          fi
-
-      - name: Check existing Android SDK
-        shell: bash
-        run: |
-          set -e
-
-          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          if [ -z "$SDK" ] || [ ! -d "$SDK" ]; then
-            echo "ERROR: No configured Android SDK found on this runner."
-            echo "This workflow does not install or change the SDK."
-            exit 1
-          fi
-
-          echo "Using existing Android SDK: $SDK"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-
-          if [ -d "$SDK/platforms" ]; then
-            echo "Installed Android platforms:"
-            ls "$SDK/platforms"
-          else
-            echo "WARNING: Android platforms directory is missing."
-          fi
+          echo "Found project: $PROJECT_DIR"
 
       - name: Build debug APK
         shell: bash
@@ -110,20 +97,28 @@ jobs:
           set -e
           cd "$PROJECT_DIR"
 
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
-          elif command -v gradle >/dev/null 2>&1; then
-            gradle --no-daemon assembleDebug
-          else
-            echo "ERROR: Gradle wrapper and system Gradle are both missing."
+          gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK exists
+        shell: bash
+        run: |
+          set -e
+
+          APK_PATH="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: APK was not generated."
+            find "$PROJECT_DIR/app/build/outputs" -type f 2>/dev/null || true
             exit 1
           fi
 
-      - name: Upload debug APK
+          echo "APK successfully generated:"
+          ls -lh "$APK_PATH"
+
+      - name: Upload RRBPREP APK
         uses: actions/upload-artifact@v4
         with:
           name: RRBPREP-debug-apk
-          path: extracted/**/app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
