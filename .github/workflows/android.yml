@@ -58,9 +58,8 @@ jobs:
           while IFS= read -r file; do
             dir="$(dirname "$file")"
 
-            if [ -f "$dir/gradlew" ] && \
-               { [ -f "$dir/settings.gradle" ] || \
-                 [ -f "$dir/settings.gradle.kts" ]; }; then
+            if [ -f "$dir/settings.gradle" ] || \
+               [ -f "$dir/settings.gradle.kts" ]; then
               PROJECT_DIR="$dir"
               break
             fi
@@ -69,18 +68,30 @@ jobs:
               -name settings.gradle -o \
               -name settings.gradle.kts \
             \)
+
           )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android project or Gradle wrapper not found."
-            echo "Extracted project files:"
-            find extracted -maxdepth 5 -type f | head -100
+            echo "ERROR: settings.gradle not found."
+            find extracted -maxdepth 6 -type f | head -150
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project found: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
 
+          if [ ! -f "$PROJECT_DIR/gradlew" ]; then
+            echo "Gradle wrapper is missing."
+            echo "Checking for a system Gradle installation..."
+
+            if command -v gradle >/dev/null 2>&1; then
+              echo "System Gradle is available."
+              echo "USE_SYSTEM_GRADLE=true" >> "$GITHUB_ENV"
+            else
+              echo "ERROR: Neither gradlew nor system Gradle is available."
+              exit 1
+            fi
+          fi
       # Step 5: Use the existing Android SDK
       # No Android SDK installation or version changes
       - name: Check existing Android SDK
@@ -107,16 +118,21 @@ jobs:
           fi
 
       # Step 6: Build the debug APK
-      - name: Build RRBPREP debug APK
+      -       - name: Build RRBPREP debug APK
         shell: bash
         run: |
           set -e
-
           cd "$PROJECT_DIR"
 
-          chmod +x gradlew
-
-          ./gradlew --no-daemon assembleDebug
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          elif command -v gradle >/dev/null 2>&1; then
+            gradle --no-daemon assembleDebug
+          else
+            echo "ERROR: No Gradle installation available."
+            exit 1
+          fi
 
       # Step 7: Find the generated APK
       - name: Locate generated APK
